@@ -28,6 +28,7 @@ env:
   KUBE_NAMESPACE: ${{ github.event.inputs.environment || (github.ref_name == 'main' && 'doctor-booking-production' || 'doctor-booking-staging') }}
   ENVIRONMENT: ${{ github.event.inputs.environment || (github.ref_name == 'main' && 'production' || 'staging') }}
 
+
 jobs:
   test:
     name: Test
@@ -85,6 +86,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
+    environment: ${{ github.event.inputs.environment || (github.ref_name == 'main' && 'production' || 'staging') }}
     outputs:
       api-image: ${{ steps.set-outputs.outputs.api-image }}
       frontend-image: ${{ steps.set-outputs.outputs.frontend-image }}
