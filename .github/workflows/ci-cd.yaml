@@ -21,8 +21,8 @@ on:
           - production
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
-  EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME || 'doctor-booking-eks' }}
+  AWS_REGION: ${{ secrets.REGION }}
+  EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME  }}
   ECR_REPOSITORY_API: doctor-booking-api
   ECR_REPOSITORY_FRONTEND: doctor-booking-frontend
   KUBE_NAMESPACE: ${{ github.event.inputs.environment || (github.ref_name == 'main' && 'doctor-booking-production' || 'doctor-booking-staging') }}
@@ -97,7 +97,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ env.REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
