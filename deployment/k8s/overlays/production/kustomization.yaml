@@ -1,0 +1,101 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Import the base configuration
+resources:
+  - ../../base
+
+# Override the namespace
+namespace: doctor-booking-production
+
+# Common labels for all resources
+commonLabels:
+  env: production
+
+# Configure the backend deployment
+patches:
+  - target:
+      kind: Deployment
+      name: doctor-booking-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: ENV
+          value: production
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: your-registry/doctor-booking-api:production
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+
+  # Configure the frontend deployment
+  - target:
+      kind: Deployment
+      name: doctor-booking-frontend
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: your-registry/doctor-booking-frontend:production
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: "50m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+
+  # Update the ingress for production
+  - target:
+      kind: Ingress
+      name: doctor-booking-ingress
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: doctor-booking-ingress-production
+      - op: add
+        path: /spec/rules/0/host
+        value: doctor-booking.example.com
+      - op: add
+        path: /metadata/annotations
+        value:
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+          nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+      - op: add
+        path: /spec/tls
+        value:
+          - hosts:
+              - doctor-booking.example.com
+            secretName: doctor-booking-tls
+
+# Add production-specific resources
+resources:
+  - ../../base
+  - certificate.yaml
+
+# Create a production certificate (cert-manager required)
+generatorOptions:
+  disableNameSuffixHash: true
+
+secretGenerator:
+  - name: doctor-booking-secrets
+    namespace: doctor-booking-production
+    literals:
+      - DB_PASSWORD=your_secure_production_password
+      - JWT_SECRET=your_secure_jwt_secret
+    type: Opaque

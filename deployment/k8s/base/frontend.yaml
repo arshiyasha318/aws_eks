@@ -1,0 +1,68 @@
+---
+# Frontend Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doctor-booking-frontend
+  namespace: doctor-booking
+  labels:
+    app: doctor-booking
+    component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: doctor-booking
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: doctor-booking
+        component: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: doctor-booking-frontend:latest  # Update with your actual image
+        ports:
+        - containerPort: 80
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: doctor-booking-config
+              key: NODE_ENV
+        - name: VITE_API_BASE_URL
+          value: /api/v1
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+# Frontend Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: doctor-booking-frontend
+  namespace: doctor-booking
+  labels:
+    app: doctor-booking
+    component: frontend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: doctor-booking
+    component: frontend

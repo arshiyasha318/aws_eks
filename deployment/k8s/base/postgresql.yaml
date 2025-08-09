@@ -1,0 +1,90 @@
+---
+# PostgreSQL StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: doctor-booking-db
+  namespace: doctor-booking
+  labels:
+    app: doctor-booking
+    component: database
+spec:
+  serviceName: doctor-booking-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: doctor-booking
+      component: database
+  template:
+    metadata:
+      labels:
+        app: doctor-booking
+        component: database
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:13-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: doctor-booking-secrets
+              key: DB_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: doctor-booking-secrets
+              key: DB_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: doctor-booking-config
+              key: DB_NAME
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+          initialDelaySeconds: 5
+          periodSeconds: 5
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
+
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: doctor-booking-db
+  namespace: doctor-booking
+  labels:
+    app: doctor-booking
+    component: database
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: doctor-booking
+    component: database
+  clusterIP: None

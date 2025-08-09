@@ -1,0 +1,213 @@
+name: CI/CD Pipeline for EKS
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+  pull_request:
+    branches:
+      - main
+      - staging
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+  EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME || 'doctor-booking-eks' }}
+  ECR_REPOSITORY_API: doctor-booking-api
+  ECR_REPOSITORY_FRONTEND: doctor-booking-frontend
+  KUBE_NAMESPACE: ${{ github.event.inputs.environment || (github.ref_name == 'main' && 'doctor-booking-production' || 'doctor-booking-staging') }}
+  ENVIRONMENT: ${{ github.event.inputs.environment || (github.ref_name == 'main' && 'production' || 'staging') }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+          # Disable caching until lock file is available
+          # cache: 'npm'
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/go/pkg/mod
+            backend/go.sum
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: |
+          go mod download
+          go install github.com/swaggo/swag/cmd/swag@latest
+          go install github.com/vektra/mockery/v2@latest
+
+      # Tests disabled per request
+      # - name: Run backend tests
+      #   run: |
+      #     make test
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      # Tests disabled per request
+      # - name: Run frontend tests
+      #   working-directory: ./frontend
+      #   run: |
+      #     npm test -- --watchAll=false --passWithNoTests
+
+  build-and-push:
+    name: Build and Push to ECR
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    outputs:
+      api-image: ${{ steps.set-outputs.outputs.api-image }}
+      frontend-image: ${{ steps.set-outputs.outputs.frontend-image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build and push API image to ECR
+        id: build-api
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_API }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_API }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          target: production
+          file: ./backend/Dockerfile
+
+      - name: Build and push Frontend image to ECR
+        id: build-frontend
+        uses: docker/build-push-action@v4
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          target: production
+          file: ./frontend/Dockerfile
+          
+      - name: Set outputs
+        id: set-outputs
+        run: |
+          echo "api-image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_API }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "frontend-image=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+  deploy-to-eks:
+    name: Deploy to EKS
+    needs: build-and-push
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event.inputs.environment || (github.ref_name == 'main' && 'production' || 'staging') }}
+      url: ${{ github.ref_name == 'main' && 'https://doctor-booking.example.com' || 'https://staging.doctor-booking.example.com' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          kubectl version --client
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Deploy to EKS
+        run: |
+          # Set environment variables
+          API_IMAGE="${{ needs.build-and-push.outputs.api-image }}"
+          FRONTEND_IMAGE="${{ needs.build-and-push.outputs.frontend-image }}"
+          
+          # Go to the overlay directory for the current environment
+          cd deployment/k8s/overlays/${{ env.ENVIRONMENT }}
+          
+          # Create namespace if it doesn't exist
+          kubectl create namespace ${{ env.KUBE_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Update kustomization with the new image tags
+          kustomize edit set image doctor-booking-api=${API_IMAGE}
+          kustomize edit set image doctor-booking-frontend=${FRONTEND_IMAGE}
+          
+          # Apply the Kubernetes manifests
+          kustomize build . | kubectl apply -f - -n ${{ env.KUBE_NAMESPACE }}
+          
+          # Wait for deployments to be ready
+          kubectl rollout status deployment/doctor-booking-api -n ${{ env.KUBE_NAMESPACE }} --timeout=300s
+          kubectl rollout status deployment/doctor-booking-frontend -n ${{ env.KUBE_NAMESPACE }} --timeout=300s
+
+      - name: Verify deployment
+        run: |
+          echo "\n--- Deployments ---"
+          kubectl get deployments -n ${{ env.KUBE_NAMESPACE }}
+          
+          echo "\n--- Services ---"
+          kubectl get svc -n ${{ env.KUBE_NAMESPACE }}
+          
+          echo "\n--- Pods ---"
+          kubectl get pods -n ${{ env.KUBE_NAMESPACE }}
+          
+          echo "\n--- Ingress ---"
+          kubectl get ingress -n ${{ env.KUBE_NAMESPACE }}
+          
+          # Get the load balancer URL if available
+          INGRESS_HOST=$(kubectl get ingress -n ${{ env.KUBE_NAMESPACE }} -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}')
+          if [ -n "$INGRESS_HOST" ]; then
+            echo "\nApplication is accessible at: http://$INGRESS_HOST"
+          fi

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: doctor-booking-config
+  namespace: doctor-booking
+data:
+  NODE_ENV: production
+  VITE_API_BASE_URL: /api/v1
+  DB_HOST: doctor-booking-db
+  DB_PORT: "5432"
+  DB_NAME: doctor_booking
+  DB_USER: postgres

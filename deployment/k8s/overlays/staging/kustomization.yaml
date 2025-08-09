@@ -1,0 +1,57 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Import the base configuration
+resources:
+  - ../../base
+
+# Override the namespace
+namespace: doctor-booking-staging
+
+# Add name prefix for all resources (optional)
+namePrefix: staging-
+
+# Common labels for all resources
+commonLabels:
+  env: staging
+
+# Configure the backend deployment
+patches:
+  - target:
+      kind: Deployment
+      name: doctor-booking-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: ENV
+          value: staging
+
+  # Configure the frontend deployment
+  - target:
+      kind: Deployment
+      name: doctor-booking-frontend
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: VITE_API_BASE_URL
+          value: /api/v1
+
+  # Update the ingress for staging
+  - target:
+      kind: Ingress
+      name: doctor-booking-ingress
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: doctor-booking-ingress-staging
+      - op: add
+        path: /spec/rules/0/host
+        value: staging.doctor-booking.example.com

@@ -1,0 +1,92 @@
+---
+# Backend API Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doctor-booking-api
+  namespace: doctor-booking
+  labels:
+    app: doctor-booking
+    component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: doctor-booking
+      component: api
+  template:
+    metadata:
+      labels:
+        app: doctor-booking
+        component: api
+    spec:
+      containers:
+      - name: api
+        image: doctor-booking-api:latest  # Update with your actual image
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: doctor-booking-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: doctor-booking-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: doctor-booking-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: doctor-booking-config
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: doctor-booking-secrets
+              key: DB_PASSWORD
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: doctor-booking-secrets
+              key: JWT_SECRET
+        - name: ENV
+          value: production
+        readinessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+
+---
+# Backend API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: doctor-booking-api
+  namespace: doctor-booking
+  labels:
+    app: doctor-booking
+    component: api
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: doctor-booking
+    component: api
